@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vault — Distributed Object Storage</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0c1220; --panel:#141d30; --line:#2a3854; --text:#eaf1ff; --muted:#97a8c7; --accent:#58a6ff; --good:#3ddc97; --warn:#ffc857; --bad:#ff6b7a; }
+    * { box-sizing:border-box; } body { margin:0; font:14px/1.45 Inter, ui-sans-serif, system-ui, sans-serif; background:linear-gradient(135deg,#09101c,#111c31); color:var(--text); min-height:100vh; }
+    header { padding:30px max(22px,calc((100vw - 1120px)/2)); border-bottom:1px solid var(--line); background:rgba(8,14,26,.7); } h1 { margin:0; font-size:29px; letter-spacing:-.6px; } h1 span { color:var(--accent); } header p { max-width:750px; color:var(--muted); margin:7px 0 0; }
+    main { max-width:1120px; margin:0 auto; padding:22px; display:grid; gap:18px; } .grid { display:grid; gap:18px; grid-template-columns:1fr 1fr; } .card { background:rgba(20,29,48,.94); border:1px solid var(--line); border-radius:12px; padding:19px; box-shadow:0 8px 30px #0002; } h2 { font-size:16px; margin:0 0 14px; } p.hint { color:var(--muted); margin:0 0 14px; }
+    label { display:block; color:var(--muted); font-size:12px; margin-bottom:5px; } input { width:100%; background:#0c1425; border:1px solid var(--line); color:var(--text); padding:9px 10px; border-radius:7px; } input:focus { outline:2px solid #58a6ff66; border-color:var(--accent); } .form-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:10px 0; }
+    button, .download { appearance:none; border:0; border-radius:7px; padding:9px 12px; font:inherit; font-weight:650; cursor:pointer; background:var(--accent); color:#061529; text-decoration:none; display:inline-block; } button.secondary { background:#273650; color:var(--text); } button.warn { background:var(--warn); color:#241800; } button:hover,.download:hover { filter:brightness(1.1); } button:disabled { opacity:.5; cursor:wait; }
+    .actions { display:flex; flex-wrap:wrap; gap:8px; align-items:end; } .status { min-height:19px; margin-top:11px; color:var(--muted); } .status.ok { color:var(--good); }.status.error { color:var(--bad); }
+    table { border-collapse:collapse; width:100%; } th,td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); vertical-align:middle; } th { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.06em; } .pill { font-size:12px; padding:3px 8px; border-radius:50px; font-weight:700; display:inline-block; } .healthy { background:#163c34; color:var(--good); }.unknown { background:#353248; color:#c8bfff; }.unavailable,.corrupt { background:#4a2331; color:#ff9bab; }.degraded { background:#4a3a1e; color:var(--warn); }
+    .mono { font-family:ui-monospace, SFMono-Regular, Consolas, monospace; font-size:12px; }.object-actions { display:flex; gap:6px; flex-wrap:wrap; }.empty { color:var(--muted); padding:13px 0; }.details { margin:12px 0 0; padding:12px; border-radius:8px; background:#0d1526; max-height:315px; overflow:auto; white-space:pre-wrap; }.notice { border-left:3px solid var(--accent); padding:9px 11px; background:#12223b; color:#c9dcf7; border-radius:0 7px 7px 0; }
+    @media (max-width:760px) { .grid { grid-template-columns:1fr; } header { padding:22px; } main { padding:15px; } table { font-size:12px; } th:nth-child(2),td:nth-child(2) { display:none; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><span>Vault</span> distributed object storage</h1>
+    <p>Content-addressed chunks · configurable quorum writes · verified reads · node health · automatic repair</p>
+  </header>
+  <main>
+    <div class="notice">Demo tip: upload a file, stop a node process, download the file successfully, then press <b>Run integrity scan</b> to show automatic replica recovery.</div>
+    <section class="grid">
+      <div class="card">
+        <h2>Upload an object</h2>
+        <p class="hint">Vault divides the file into 1 MiB chunks and only publishes a complete version after write quorum succeeds.</p>
+        <label for="file">Choose file</label><input id="file" type="file">
+        <div class="form-row"><div><label for="key">Object key</label><input id="key" placeholder="Filled from file name"></div><div><label>Maximum demo upload</label><input value="100 MiB" disabled></div></div>
+        <div class="actions"><button id="upload">Upload with quorum</button></div><div id="upload-status" class="status"></div>
+      </div>
+      <div class="card">
+        <h2>Durability policy</h2>
+        <p class="hint">New uploads use these values. Existing versions retain the policy they were written with.</p>
+        <div class="form-row"><div><label for="replication">Replication factor</label><input id="replication" type="number" min="1" max="4"></div><div><label for="quorum">Write quorum</label><input id="quorum" type="number" min="1" max="4"></div></div>
+        <div class="actions"><button id="save-policy" class="secondary">Save policy</button><button id="repair" class="secondary">Run integrity scan</button><button id="rebalance" class="secondary">Rebalance</button></div><div id="policy-status" class="status"></div>
+      </div>
+    </section>
+    <section class="card"><h2>Cluster health <small id="refresh-note" class="hint"></small></h2><div id="nodes"></div></section>
+    <section class="card"><h2>Stored objects</h2><div id="objects"></div><div id="details" class="details" hidden></div></section>
+  </main>
+  <script>
+    const byId = id => document.getElementById(id);
+    const html = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    let objectCache = [];
+    function status(id, message, kind='') { const target = byId(id); target.textContent = message; target.className = `status ${kind}`; }
+    async function api(route, options={}) { const response = await fetch(route, options); const value = await response.json().catch(() => ({})); if (!response.ok) throw new Error(value.error || `Request failed (${response.status})`); return value; }
+    function bytes(value) { if (value < 1024) return `${value} B`; if (value < 1048576) return `${(value/1024).toFixed(1)} KiB`; return `${(value/1048576).toFixed(2)} MiB`; }
+    function pill(value) { return `<span class="pill ${html(value)}">${html(value)}</span>`; }
+    async function refresh() {
+      try {
+        const [cluster, objectList] = await Promise.all([api('/api/cluster'), api('/api/objects')]);
+        byId('replication').value = cluster.cluster.replicationFactor; byId('quorum').value = cluster.cluster.writeQuorum;
+        byId('refresh-note').textContent = cluster.repairRunning ? 'repair in progress…' : 'live';
+        byId('nodes').innerHTML = `<table><thead><tr><th>Node</th><th>Address</th><th>Status</th><th>Last health check</th><th>Detail</th></tr></thead><tbody>${cluster.nodes.map(node => `<tr><td><b>${html(node.id)}</b></td><td class="mono">${html(node.url)}</td><td>${pill(node.status)}</td><td>${node.lastSeen ? new Date(node.lastSeen).toLocaleTimeString() : '—'}</td><td class="mono">${html(node.lastError || 'ready')}</td></tr>`).join('')}</tbody></table>`;
+        objectCache = objectList.objects;
+        byId('objects').innerHTML = objectCache.length ? `<table><thead><tr><th>Object</th><th>Size</th><th>Chunks</th><th>Replicas</th><th>Health</th><th>Actions</th></tr></thead><tbody>${objectCache.map(obj => `<tr><td class="mono">${html(obj.key)}</td><td>${bytes(obj.bytes)}</td><td>${obj.chunks}</td><td>${obj.minimumVerifiedReplicas}/${obj.desiredReplicas}</td><td>${pill(obj.health)}</td><td><div class="object-actions"><a class="download" href="/objects/${encodeURIComponent(obj.key)}">Download</a><button class="secondary" onclick="inspectObject(${JSON.stringify(obj.key)})">Inspect</button></div></td></tr>`).join('')}</tbody></table>` : '<div class="empty">No objects yet. Upload a small file to begin.</div>';
+      } catch (error) { console.error(error); }
+    }
+    window.inspectObject = async key => { try { const object = await api(`/api/objects/${encodeURIComponent(key)}`); byId('details').hidden = false; byId('details').textContent = JSON.stringify(object, null, 2); } catch (error) { status('policy-status', error.message, 'error'); } };
+    byId('file').addEventListener('change', event => { if (!byId('key').value && event.target.files[0]) byId('key').value = event.target.files[0].name; });
+    byId('upload').onclick = async () => {
+      const file = byId('file').files[0], key = byId('key').value.trim();
+      if (!file || !key) return status('upload-status', 'Choose a file and give it an object key.', 'error');
+      const button = byId('upload'); button.disabled = true; status('upload-status', `Uploading ${bytes(file.size)}…`);
+      try { const value = await api(`/objects/${encodeURIComponent(key)}`, { method:'PUT', headers:{'content-type':file.type || 'application/octet-stream','x-vault-filename':file.name}, body:file }); status('upload-status', `Success: ${value.chunks} chunk(s), version ${value.versionId}.`, 'ok'); await refresh(); }
+      catch (error) { status('upload-status', error.message, 'error'); } finally { button.disabled = false; }
+    };
+    byId('save-policy').onclick = async () => { try { const v = await api('/api/config', {method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({replicationFactor:+byId('replication').value,writeQuorum:+byId('quorum').value})}); status('policy-status', `Saved: ${v.cluster.writeQuorum}-of-${v.cluster.replicationFactor} writes.`, 'ok'); } catch (error) { status('policy-status', error.message, 'error'); } };
+    byId('repair').onclick = async () => { status('policy-status','Checking every replica…'); try { const v = await api('/api/repair',{method:'POST'}); status('policy-status',v.alreadyRunning ? 'A background repair is already running; refresh in a moment.' : `Scan complete: ${v.scanned} chunks, ${v.repaired} replica(s) repaired.`, 'ok'); await refresh(); } catch(error) { status('policy-status',error.message,'error'); } };
+    byId('rebalance').onclick = async () => { status('policy-status','Moving chunks toward balanced placements…'); try { const v = await api('/api/rebalance',{method:'POST'}); status('policy-status',`Rebalance complete: ${v.repaired} placement(s) created.`, 'ok'); await refresh(); } catch(error) { status('policy-status',error.message,'error'); } };
+    refresh(); setInterval(refresh, 3000);
+  </script>
+</body>
+</html>

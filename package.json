@@ -1,0 +1,12 @@
+{
+  "name": "vault-distributed-storage",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Hackathon prototype: replicated, self-repairing distributed object storage",
+  "scripts": {
+    "start": "powershell -ExecutionPolicy Bypass -File .\\scripts\\start-cluster.ps1",
+    "stop": "powershell -ExecutionPolicy Bypass -File .\\scripts\\stop-cluster.ps1",
+    "demo": "powershell -ExecutionPolicy Bypass -File .\\scripts\\demo.ps1"
+  },
+  "engines": { "node": ">=18" }
+}
